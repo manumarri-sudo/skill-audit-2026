@@ -1,0 +1,55 @@
+# =============================================================================
+# PRIVATE WORKING ARTIFACTS — never push these
+# =============================================================================
+# Personal drafts and production notes
+SUBSTACK_DRAFT.md
+SUBSTACK_DRAFT_*.md
+LINKEDIN_POST.md
+RECORDING_SCRIPT.md
+EXPERIMENT_DESIGN.md
+FINDINGS_AND_REMEDIATION.md
+demo_output.md
+demo_output_*.md
+*.private.md
+notes/
+private/
+
+# Per-vendor findings (the writeup is pseudonymized — raw JSON with vendor
+# names is private to preserve editorial pseudonymization in the public post)
+findings/
+data/
+
+# Cached embeddings / models
+*.pkl
+*.parquet
+*.cache/
+
+# =============================================================================
+# Standard Python
+# =============================================================================
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+
+# =============================================================================
+# OS / editor
+# =============================================================================
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# =============================================================================
+# Secrets
+# =============================================================================
+.env
+.env.local
+.envrc
+scripts/_archive_private/
