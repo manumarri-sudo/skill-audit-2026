@@ -1,7 +1,7 @@
 [project]
 name = "skill-audit"
 version = "0.1.0"
-description = "Comprehensive static scanner for MCP / agent / skill text. Detects 26 attack classes from 2026 security research: Line Jumping, schema-vs-description mismatch, consent bypass, tool commandeering, conversation exfiltration, and more."
+description = "Local heuristic scanner for MCP tool descriptions and agent-facing text, with 30 detection categories and review-oriented findings."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

@@ -1,135 +1,54 @@
 # Methodology
 
-How the scanner works, how each detection class was chosen, and the
-limits of static analysis.
+The scanner applies 30 local heuristic detection categories to supplied text and optional input schemas. It does not execute that text, call a model, connect to a server, or test whether an instruction succeeds.
 
-## Pipeline
+## Implementation and interpretation
 
-For each piece of agent-facing text (an MCP tool description, a SKILL.md
-body, an agent.md file), the scanner runs 26 independent detection passes
-plus a tier classifier. Each pass has clear regex / heuristic signatures
-and emits a list of hit records. The tier classifier combines those into
-one of four outputs:
+`src/skill_audit/detectors.py` contains the detector functions, the `CLASS_SEVERITY` catalogue and the classifier. Findings retain the category and matched text for human review.
 
-| Tier | Meaning |
+| Output | Interpretation |
 |---|---|
-| `TIER_1_VULN` | A strict-bar vulnerability fired. Schema mismatch, explicit consent bypass, coerced FS write, hidden Unicode + instructions, indirect injection, shell exec, credentials, conversation exfiltration, persistence, priv-esc. |
-| `TIER_2_PATTERN` | A documented attack pattern fired but no strict-vuln signal. Imperative density, tool commandeering, excessive scope claims. |
-| `TIER_3_WEAK` | One weak signal, manual review warranted. |
-| `CLEAN` | Nothing fired. |
+| `TIER_1_VULN` | At least one strict-tier heuristic fired. Despite the legacy label, an exploit has not been established. |
+| `TIER_2_PATTERN` | Pattern signals fired without a strict-tier finding. |
+| `TIER_3_WEAK` | A nonzero score remains without a stronger classification. |
+| `CLEAN` | No configured scoring signal fired; safety has not been established. |
 
-A composite severity score (0-100) accumulates per-hit weight by class
-severity. Scores ≥ 30 with multiple class hits are the high-confidence
-named-vendor set.
+The severity score accumulates weighted matches and is capped at 100. The general weights are critical 10, high 5, medium 2 and low 1, with category-specific caps and exceptions in the classifier. Tier selection depends on the finding categories, not simply on a numeric threshold. Neither the weights nor the tier names are calibrated probabilities.
 
-## Why each class was added
+Some thresholds reduce obvious noise: a single consent-bypass match stays a pattern signal, line-jumping needs at least three matched imperatives for its strict tier, and ordinary contact fields such as email or phone do not by themselves trigger the narrow PII-name detector. These choices can still produce both false positives and false negatives.
 
-Every detection class traces to published security research. Numbered
-references in `src/skill_audit/detectors.py` cite the originating paper
-or advisory.
+## Research background
 
-* **A. Hidden character injection** — Invariant Labs 2025 (the original
-  Tool Poisoning Attack); Embrace The Red, *Scary Agent Skills*
-  (Feb 2026, the "Unicode-Tag" thresholds we use).
-* **B. Homoglyphs** — same lineage; the latin-ratio gate prevents
-  false positives on multilingual servers.
-* **C. Encoded payloads** — arXiv 2601.17548 §M1.3 ("Encoding
-  Obfuscation").
-* **D. Instruction tags** — `<SYSTEM>`, `<IMPORTANT>`, role tags from
-  Invariant Labs' canonical examples.
-* **E. Imperatives + J. caps density** — observed pattern across the
-  May 2026 ecosystem rescan; high frequency in published descriptions.
-* **F. Schema-vs-description mismatch** — the CircleCI pattern from
-  the May 2026 rescan; 64 cases in the public corpus.
-* **G. Consent bypass + H. Coerced write** — Skyramp-MCP pattern.
-* **I. Tool commandeering** — desktop-commander variants.
-* **AA. Line Jumping** — Trail of Bits, *Jumping the line* (April 2025).
-  The single most important class for an MCP scanner; treat tool
-  descriptions as instructions, not metadata.
-* **BB. ANSI escape** — Mindgard AnsiEscaped attack library (2026).
-* **CC. Conversation-history exfiltration** — Trail of Bits, *How
-  MCP servers can steal your conversation history* (April 2025).
-* **DD. Lethal Trifecta** — Simon Willison (compositional, not in this
-  scanner yet; lives at the install / manifest layer).
-* **EE. OAuth confused deputy** — MCP spec security guidance, 2026.
-* **FF. Promptware C2** — Rehberger, *Agent Commander* (March 2026).
-* The remaining classes (K through Z) come from OWASP Top 10 for
-  Agentic Applications, OWASP LLM Top 10, the Vulnerable MCP Project
-  taxonomy, and the May 2026 ecosystem rescan.
+These primary sources explain the broader attack surface; they do not validate this scanner's accuracy or its individual weights:
 
-## The PII detector is intentionally narrow
+* [Invariant Labs, Tool Poisoning Attacks, April 1, 2025](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks) describes attacks using instructions embedded in tool descriptions, including cross-tool influence.
+* [Trail of Bits, Jumping the line, April 21, 2025](https://blog.trailofbits.com/2025/04/21/jumping-the-line-how-mcp-servers-can-attack-you-before-you-ever-use-them/) examines malicious descriptions that influence an agent before the advertised tool is invoked.
+* [MCP tools specification, June 18, 2025](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) describes tool definitions, input schemas and the tools/list exchange.
 
-A common mistake in scanners of this kind is flagging every tool that
-accepts an `email` or `phone` parameter as a privacy issue. That's
-noise. The scanner here flags only the **canonical suspicious set**:
+Historical project drafts included corpus counts and vendor-level interpretations. The original corpus and adjudication records are not included here, and those older claims are not reproduced or established by this release. Current documentation describes the shipped scanner and avoids treating static matches as evidence of successful attacks.
 
-* The Invariant `sidenote` pattern (undocumented context-soliciting
-  fields).
-* Explicit prompt or conversation capture (`originalUserMessage`,
-  `conversation_history`, `system_prompt`, etc.).
-* Secrets passed as arguments (`api_key`, `access_token`,
-  `private_key`, etc. — these should come via env, not tool args).
-* Explicit high-sensitivity PII (`ssn`, `credit_card`, `cvv`,
-  `passport`, `private_key`, `iban`).
+## Coverage limits
 
-Common fields (`email`, `phone`, `address`, `name`) are not flagged
-on their own. They only contribute to a finding when paired with other
-suspicious signals.
+* Pattern matching can miss instructions expressed in an unfamiliar way and flag legitimate operational documentation.
+* A description/schema discrepancy does not establish what a server's runtime handler enforces, and a prompt-capture parameter is not proof of unauthorized exfiltration.
+* The corpus runner skips malformed or unreadable tool files and records that raise scan errors. Its output cannot attest that every record was examined.
+* Findings contain the supplied text and server identifiers. Treat saved results as sensitive whenever the input is sensitive.
+* Tests establish behavior for selected inputs, not ecosystem-wide precision, recall or exploitability.
 
-This is a deliberate precision-over-recall trade. The May 2026 rescan's
-high-confidence set is 30 multi-class TIER_1 findings; the noisy version
-of the same scanner would have produced 1,959.
-
-## Limits
-
-* **Static is a lower bound.** Many attacks require an LLM judge to
-  flag with high precision. The original invisible-ink scan pairs this
-  static layer with Kimi K2.6 / Claude Haiku for ambiguous cases.
-* **Tier classification is heuristic.** Findings with severity score
-  ≥ 30 with multiple class hits are the high-confidence set; lower
-  scores warrant manual review. The published writeup uses the strict
-  multi-class TIER_1 subset, not the full TIER_1 count.
-* **Pseudonymization is editorial, not technical.** The scanner outputs
-  full server identifiers in its JSON; the writeup chooses to anonymize.
-* **The corpus changes.** Tool descriptions are published, updated, and
-  withdrawn. Pin a hash on first scan if you want to detect drift.
-* **Line Jumping is the most over-fired class** in practice. The strict
-  bar (≥ 3 second-person imperatives) is tuned to keep the false-positive
-  rate manageable, but it still catches some legitimate tool docs that
-  use *"You can also..."* style. Manual triage of TIER_1 Line Jumping
-  findings is recommended before any disclosure.
-
-## Cross-reference with the runtime defense
-
-Static scanning catches the patterns at write-time. Runtime adjudication
-catches the residue — the behaviors that pass schema validation but
-exceed user intent. The companion repo at
-[mcp-line-jumping-demo](https://github.com/manumarri-sudo/mcp-line-jumping-demo)
-demonstrates both layers side-by-side: a deliberately-poisoned MCP
-server and a guarded version wrapped with the
-[adjudicator](https://github.com/manumarri-sudo/adjudicator) Haiku-judge
-layer.
-
-## Reproducibility
+## Reproduce the local checks
 
 ```bash
-# 1. install
 git clone https://github.com/manumarri-sudo/skill-audit-2026
 cd skill-audit-2026
-uv venv && uv pip install -e ".[dev]"
-
-# 2. run the test suite (12 tests, deterministic)
-pytest -q
-
-# 3. scan your own corpus
-python -c "
-import json
-from skill_audit import scan
-text = open('your-tool-description.txt').read()
-schema = json.load(open('your-tool-schema.json'))  # optional
-print(scan(text, input_schema=schema))
-"
+uv venv
+uv pip install -e ".[dev]"
+.venv/bin/python -m pytest -q
 ```
 
-For corpus-level scans (walking a directory of MCP servers each with a
-`tools.json`), see the scripts in this repo's `scripts/` directory.
+For a directory containing server folders with `tools.json`, run:
+
+```bash
+.venv/bin/python scripts/scan.py /path/to/servers --out findings.json
+```
+
+Review skipped or malformed inputs separately before using corpus totals in research.
